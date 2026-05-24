@@ -1,0 +1,37 @@
+[package]
+name = "career-dude-backend"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+
+[dependencies]
+axum = { version = "0.7", features = ["macros"] }
+tokio = { version = "1.35", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace", "compression-full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "migrate", "macros"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.6", features = ["serde", "v4"] }
+jsonwebtoken = "9.2"
+argon2 = "0.5"
+rand = "0.8"
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+axum-extra = { version = "0.9", features = ["multipart"] }
+pdf-extract = "0.7"
+tempfile = "3.10"
+thiserror = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dotenvy = "0.15"
+regex = "1.10"
+urlencoding = "2.1"
+url = "2.5"
+validator = { version = "0.16", features = ["derive"] }
+headless_chrome = "1.0"
+
+[dev-dependencies]
+tower = { version = "0.4", features = ["util"] }
+hyper = { version = "1.0", features = ["full"] }

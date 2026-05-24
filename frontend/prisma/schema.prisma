@@ -1,0 +1,154 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id                  String    @id @default(uuid())
+  email               String    @unique
+  name                String?
+  passwordHash        String    @map("password_hash")
+  role                String    @default("user")
+  subscriptionTier    String    @default("free") @map("subscription_tier")
+  aiCreditsBalance    Int       @default(5) @map("ai_credits_balance")
+  masterProfileCv     String?   @map("master_profile_cv")
+  apiKeys             Json?     @map("api_keys")
+  targetRoles         Json?     @map("target_roles")
+  minSalary           Int?      @map("min_salary")
+  dealbreakers        Json?
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  jobEvaluations   JobEvaluation[]
+  applications     Application[]
+  generatedAssets  GeneratedAsset[]
+  portalScans      PortalScan[]
+  followups        Followup[]
+  subscriptions    Subscription[]
+
+  @@map("users")
+}
+
+model JobEvaluation {
+  id               String   @id @default(uuid())
+  userId           String   @map("user_id")
+  jobUrl           String?  @map("job_url")
+  jobTitle         String?  @map("job_title")
+  company          String?
+  rawDescription   String?  @map("raw_description")
+  aiScore          String?  @map("ai_score")
+  missingSkills    Json?    @map("missing_skills")
+  evaluationReport String?  @map("evaluation_report")
+  archetype        String?
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  applications Application[]
+  assets       GeneratedAsset[]
+
+  @@index([userId])
+  @@map("job_evaluations")
+}
+
+enum ApplicationStatus {
+  saved
+  applied
+  interview
+  offer
+  rejected
+}
+
+model Application {
+  id                String            @id @default(uuid())
+  userId            String            @map("user_id")
+  jobEvaluationId   String?           @map("job_evaluation_id")
+  status            ApplicationStatus @default(saved)
+  notes             String?
+  appliedAt         DateTime?         @map("applied_at")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobEvaluation   JobEvaluation?   @relation(fields: [jobEvaluationId], references: [id], onDelete: SetNull)
+  followups       Followup[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("applications")
+}
+
+enum AssetType {
+  resume
+  cover_letter
+  prep_sheet
+}
+
+model GeneratedAsset {
+  id           String    @id @default(uuid())
+  userId       String    @map("user_id")
+  assetType    AssetType @map("asset_type")
+  content      String
+  linkedJobId  String?   @map("linked_job_id")
+  fileUrl      String?   @map("file_url")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  linkedJob  JobEvaluation? @relation(fields: [linkedJobId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@map("generated_assets")
+}
+
+model PortalScan {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  portalName   String   @map("portal_name")
+  status       String   @default("pending")
+  urlsFound    Json?    @map("urls_found")
+  startedAt    DateTime? @map("started_at")
+  completedAt  DateTime? @map("completed_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("portal_scans")
+}
+
+model Followup {
+  id              String    @id @default(uuid())
+  userId          String    @map("user_id")
+  applicationId   String?   @map("application_id")
+  actionType      String    @map("action_type")
+  dueDate         DateTime? @map("due_date")
+  completed       Boolean   @default(false)
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("followups")
+}
+
+model Subscription {
+  id                   String    @id @default(uuid())
+  userId               String    @map("user_id")
+  zohoSubscriptionId   String?   @map("zoho_subscription_id")
+  plan                 String
+  status               String    @default("active")
+  currentPeriodStart   DateTime? @map("current_period_start")
+  currentPeriodEnd     DateTime? @map("current_period_end")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("subscriptions")
+}

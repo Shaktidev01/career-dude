@@ -1,0 +1,24 @@
+# Environment files — never commit real secrets
+.env
+.env.local
+.env.production
+backend/.env
+frontend/.env
+frontend/.env.local
+frontend/.env.production
+
+# Rust build artifacts (Cargo.lock committed — binary crate)
+target/
+
+# Node
+node_modules/
+.next/
+out/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

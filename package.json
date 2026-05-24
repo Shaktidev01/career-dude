@@ -1,0 +1,17 @@
+{
+  "name": "career-dude",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently \"cd backend && \\\"C:\\Users\\ankar\\.cargo\\bin\\cargo.exe\\\" run\" \"cd frontend && npm run dev\"",
+    "build": "cd frontend && npm run build",
+    "db:migrate": "cd frontend && npx prisma migrate dev",
+    "db:generate": "cd frontend && npx prisma generate"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
