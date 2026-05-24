@@ -2,7 +2,7 @@ use axum::{routing::get, Router};
 use std::net::SocketAddr;
 use tower_http::{cors::CorsLayer, trace::TraceLayer, compression::CompressionLayer};
 use tower_http::cors::AllowOrigin;
-use axum::http::{HeaderValue, Method};
+use axum::http::{HeaderValue, Method, header};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod api;
@@ -77,9 +77,16 @@ fn build_cors() -> CorsLayer {
         .parse()
         .expect("FRONTEND_URL is not a valid HTTP header value");
 
+    // Note: allow_headers(Any) is incompatible with allow_credentials(true) per the Fetch spec.
+    // Enumerate the headers we actually need instead of using a wildcard.
     CorsLayer::new()
         .allow_origin(AllowOrigin::exact(origin))
         .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE, Method::OPTIONS])
-        .allow_headers(tower_http::cors::Any)
+        .allow_headers([
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            header::ACCEPT,
+            header::HeaderName::from_static("x-requested-with"),
+        ])
         .allow_credentials(true)
 }

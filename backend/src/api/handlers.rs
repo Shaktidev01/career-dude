@@ -73,28 +73,22 @@ pub async fn create_evaluation(
     Json(payload): Json<CreateJobEvaluation>,
 ) -> ApiResult<JobEvaluation> {
     
-    // Deduct credit
-    let mut tx = pool.begin().await?;
+    // Phase 1: read-only checks — no transaction so we don't hold a connection during AI call.
     let credits: i32 = sqlx::query_scalar("SELECT ai_credits_balance FROM users WHERE id = $1")
         .bind(current_user.id)
-        .fetch_one(&mut *tx)
+        .fetch_one(&pool)
         .await?;
-        
+
     if credits < 1 {
         return Err(AppError::Validation("Insufficient AI credits".into()));
     }
-    
-    sqlx::query("UPDATE users SET ai_credits_balance = ai_credits_balance - 1 WHERE id = $1")
-        .bind(current_user.id)
-        .execute(&mut *tx)
-        .await?;
 
     // Fetch user's full profile (CV + preferences)
     let profile_row = sqlx::query(
         "SELECT master_profile_cv, min_salary, max_salary, salary_currency, country, location, work_types, work_modes, dealbreakers, target_roles FROM users WHERE id = $1"
     )
     .bind(current_user.id)
-    .fetch_one(&mut *tx)
+    .fetch_one(&pool)
     .await?;
 
     let user_cv = profile_row.try_get::<Option<String>, _>("master_profile_cv")
@@ -164,8 +158,11 @@ pub async fn create_evaluation(
                             || host.starts_with("127.")
                             || host.starts_with("10.")
                             || host.starts_with("192.168.")
+                            || host.starts_with("169.254.")  // link-local — AWS/GCP/Azure IMDS
                             || host == "0.0.0.0"
                             || host == "::1"
+                            || host.starts_with("fd")        // IPv6 ULA (fd00::/8)
+                            || host.starts_with("fe80")      // IPv6 link-local
                             || (host.starts_with("172.") && {
                                 // 172.16.0.0/12
                                 let octet: u8 = host.split('.').nth(1).unwrap_or("0").parse().unwrap_or(0);
@@ -190,7 +187,15 @@ pub async fn create_evaluation(
         user_cv,
         user_preferences,
     };
+    // Phase 2: AI call — happens outside any transaction.
     let ai_result = ai_engine.evaluate_job(&req).await.map_err(|e| AppError::Internal(e.into()))?;
+
+    // Phase 3: short atomic transaction — deduct credit + insert result.
+    let mut tx = pool.begin().await?;
+    sqlx::query("UPDATE users SET ai_credits_balance = ai_credits_balance - 1 WHERE id = $1 AND ai_credits_balance > 0")
+        .bind(current_user.id)
+        .execute(&mut *tx)
+        .await?;
 
     let eval_id = uuid::Uuid::new_v4();
     let evaluation = sqlx::query_as::<_, JobEvaluation>(
@@ -212,7 +217,7 @@ pub async fn create_evaluation(
     .bind(&ai_result.archetype)
     .fetch_one(&mut *tx)
     .await?;
-    
+
     tx.commit().await?;
 
     Ok(Json(evaluation))
@@ -372,30 +377,27 @@ pub async fn generate_asset(
         
     let user_cv = cv_row.unwrap_or_else(|| "Default CV content".to_string());
     
-    // 3. Deduct credit
-    let mut tx = pool.begin().await?;
+    // 3. Check credits (read-only — no transaction yet)
     let credits: i32 = sqlx::query_scalar("SELECT ai_credits_balance FROM users WHERE id = $1")
         .bind(current_user.id)
-        .fetch_one(&mut *tx)
+        .fetch_one(&pool)
         .await?;
-        
+
     if credits < 1 {
         return Err(AppError::Validation("Insufficient AI credits".into()));
     }
-    
-    sqlx::query("UPDATE users SET ai_credits_balance = ai_credits_balance - 1 WHERE id = $1")
+
+    // 4. Generate with AI (outside any transaction — may take 5-30s)
+    let ai_engine = AiEngine::new().map_err(|e| AppError::Internal(e.into()))?;
+    let content = ai_engine.generate_resume(&job_description, &user_cv).await.map_err(|e| AppError::Internal(e.into()))?;
+
+    // 5. Short atomic transaction: deduct credit + insert asset
+    let mut tx = pool.begin().await?;
+    sqlx::query("UPDATE users SET ai_credits_balance = ai_credits_balance - 1 WHERE id = $1 AND ai_credits_balance > 0")
         .bind(current_user.id)
         .execute(&mut *tx)
         .await?;
 
-    // 4. Generate with AI
-    let ai_engine = AiEngine::new().map_err(|e| AppError::Internal(e.into()))?;
-    
-    // In a full implementation we'd differentiate logic based on asset_type (Resume vs CoverLetter)
-    // For now we'll pass it to generate_resume which generates ATS optimized markdown.
-    let content = ai_engine.generate_resume(&job_description, &user_cv).await.map_err(|e| AppError::Internal(e.into()))?;
-
-    // 5. Save the generated asset
     let asset_id = uuid::Uuid::new_v4();
     let asset = sqlx::query_as::<_, GeneratedAsset>(
         r#"
@@ -1090,8 +1092,9 @@ pub async fn update_profile(
     Ok(Json(json!({ "status": "updated" })))
 }
 
-/// Public PDF→Markdown conversion — no auth, no DB save (used during onboarding)
+/// PDF→Markdown conversion — requires auth to prevent Gemini quota abuse (used during onboarding).
 pub async fn convert_pdf_public(
+    _current_user: CurrentUser,
     mut multipart: Multipart,
 ) -> ApiResult<serde_json::Value> {
     let mut pdf_bytes: Option<Vec<u8>> = None;
@@ -1635,16 +1638,21 @@ pub async fn employer_screen_cv(
     current_user: CurrentUser,
     Json(payload): Json<EmployerScreenCvRequest>,
 ) -> ApiResult<serde_json::Value> {
+    // Check credits before the AI call (read-only, no transaction).
     let credits: i32 = sqlx::query_scalar("SELECT ai_credits_balance FROM users WHERE id = $1")
         .bind(current_user.id).fetch_one(&pool).await?;
     if credits < 1 { return Err(AppError::Validation("Insufficient AI credits".into())); }
-    sqlx::query("UPDATE users SET ai_credits_balance = ai_credits_balance - 1 WHERE id = $1")
-        .bind(current_user.id).execute(&pool).await?;
 
     let ai_engine = AiEngine::new().map_err(|e| AppError::Internal(e.into()))?;
     let name = payload.candidate_name.as_deref().unwrap_or("Candidate");
     let report = ai_engine.employer_screen_cv(&payload.job_description, &payload.candidate_cv, name)
         .await.map_err(|e| AppError::Internal(e.into()))?;
+
+    // Deduct credit only after successful AI response.
+    let mut tx = pool.begin().await?;
+    sqlx::query("UPDATE users SET ai_credits_balance = ai_credits_balance - 1 WHERE id = $1 AND ai_credits_balance > 0")
+        .bind(current_user.id).execute(&mut *tx).await?;
+    tx.commit().await?;
 
     Ok(Json(json!({ "candidate": name, "report": report })))
 }

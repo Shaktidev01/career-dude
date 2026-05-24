@@ -8,7 +8,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation, Algorithm};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -51,10 +51,12 @@ where
         }
         let token = &auth_header[7..];
 
+        let mut validation = Validation::new(Algorithm::HS256);
+        validation.validate_exp = true;
         let token_data = decode::<Claims>(
             token,
-            &get_decoding_key(),
-            &Validation::default(),
+            get_decoding_key(),
+            &validation,
         )
         .map_err(|_| auth_err())?;
 
@@ -84,7 +86,12 @@ pub fn create_jwt(user: &User) -> anyhow::Result<String> {
     Ok(token)
 }
 
-fn get_decoding_key() -> DecodingKey {
-    let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
-    DecodingKey::from_secret(secret.as_bytes())
+fn get_decoding_key() -> &'static DecodingKey {
+    use std::sync::OnceLock;
+    static KEY: OnceLock<DecodingKey> = OnceLock::new();
+    KEY.get_or_init(|| {
+        let secret = std::env::var("JWT_SECRET")
+            .expect("JWT_SECRET must be set — validated at startup");
+        DecodingKey::from_secret(secret.as_bytes())
+    })
 }
