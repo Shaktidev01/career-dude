@@ -1092,11 +1092,18 @@ pub async fn update_profile(
     Ok(Json(json!({ "status": "updated" })))
 }
 
-/// PDF→Markdown conversion — requires auth to prevent Gemini quota abuse (used during onboarding).
+/// Public PDF→Markdown for onboarding (no auth — called before user logs in).
+/// Guarded by a global semaphore (max 3 concurrent) to cap Gemini quota burn.
 pub async fn convert_pdf_public(
-    _current_user: CurrentUser,
     mut multipart: Multipart,
 ) -> ApiResult<serde_json::Value> {
+    use std::sync::OnceLock;
+    use tokio::sync::Semaphore;
+    static PDF_SEM: OnceLock<Semaphore> = OnceLock::new();
+    let sem = PDF_SEM.get_or_init(|| Semaphore::new(3));
+    let _permit = sem.try_acquire().map_err(|_| {
+        AppError::TooManyRequests("PDF conversion busy — try again in a moment.".into())
+    })?;
     let mut pdf_bytes: Option<Vec<u8>> = None;
 
     while let Some(field) = multipart.next_field().await.map_err(|e| {

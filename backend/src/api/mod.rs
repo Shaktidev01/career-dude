@@ -8,15 +8,15 @@ use sqlx::PgPool;
 
 use crate::api::handlers::*;
 
-/// Public routes — no auth required (kept for health check pass-through; no endpoints currently)
+/// Public routes — no auth required (onboarding flows only).
 pub fn public_router() -> Router<PgPool> {
     Router::new()
+        // Unauthenticated PDF→Markdown for onboarding. Rate-limited via semaphore inside handler.
+        .route("/convert-pdf", post(convert_pdf_public))
 }
 
 pub fn protected_router() -> Router<PgPool> {
     Router::new()
-        // PDF conversion moved from public to protected — requires auth to prevent Gemini quota abuse.
-        .route("/convert-pdf", post(convert_pdf_public))
         .route("/dashboard", get(dashboard_summary))
         .route("/evaluations", get(list_evaluations).post(create_evaluation))
         .route("/applications", get(list_applications).post(create_application))
